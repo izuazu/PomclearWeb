@@ -100,11 +100,11 @@
                     <p id="tds">Loading...</p>
                 </div>
                 <div class="info-item">
-                    <h4>Durasi</h4>
+                    <h4>Duration</h4>
                     <p id="Durasi">Loading...</p>
                 </div>
                 <div class="info-item">
-                    <h4>Degradasi</h4>
+                    <h4>Degradation</h4>
                     <p id="degradation">Loading...</p>
                 </div>
                 <div class="info-item">
@@ -552,7 +552,7 @@
             function startSystem() {
                 if (!isSystemRunning) {
                     isSystemRunning = true;
-                    localStorage.setItem('systemStatus', 'running');
+                    localStorage.setItem('systemStatus', 'statusElement');
                     sendSystemStatus('running');
                     const startTime = new Date().getTime();
                     localStorage.setItem('startTime', startTime);
@@ -596,8 +596,8 @@
                        Co = null;
                   }
                   loadChartDataFromStorage();
-                  statusElement.textContent = localStorage.getItem('statusValue') || "Waiting Data...";
-                  statusElement.style.color = localStorage.getItem('statusColor') || "orange";
+                  statusElement.textContent = localStorage.getItem('statusValue') || "N/A";
+                  statusElement.style.color = localStorage.getItem('statusColor') || "black";
                   temporaryData = JSON.parse(localStorage.getItem('temporaryData')) || [];
                   updateDownloadTableDisplay();
                   updateChart(currentDataset);
@@ -1034,9 +1034,9 @@
                         }
                     }
                     if (dataUpdated) {
-                        const currentPH = parseFloat(phElement.textContent) || 0;
-                        const currentTurbidity = parseFloat(turbidityElement.textContent) || 0;
-                        const currentTDS = parseFloat(tdsElement.textContent) || 0;
+                        const currentPH = parseFloat(phElement.textContent);
+                        const currentTurbidity = parseFloat(turbidityElement.textContent);
+                        const currentTDS = parseFloat(tdsElement.textContent);
                         if (!isNaN(currentPH) && !isNaN(currentTurbidity) && !isNaN(currentTDS)) {
                             const phMinOk = 6.0;
                             const phMaxOk = 9.0;
@@ -1046,18 +1046,22 @@
                                 currentTurbidity < turbidityMaxOk &&
                                 currentTDS < tdsMaxOk)
                             {
-                                statusElement.textContent = 'Aman';
+                                statusElement.textContent = 'Safe';
                                 statusElement.style.color = 'green';
                             } else {
-                                statusElement.textContent = 'Tidak Aman';
+                                statusElement.textContent = 'Not Safe';
                                 statusElement.style.color = 'red';
                             }
+                            localStorage.setItem('statusValue', statusElement.textContent);
+                            localStorage.setItem('statusColor', statusElement.style.color);
                         } else {
-                            statusElement.textContent = 'Waiting Data...';
-                            statusElement.style.color = 'orange';
+                             if(localStorage.getItem('systemStatus') !== 'running') {
+                                 statusElement.textContent = 'N/A';
+                                 statusElement.style.color = 'black';
+                                  localStorage.setItem('statusValue', 'N/A');
+                                  localStorage.setItem('statusColor', 'black');
+                             }
                         }
-                         localStorage.setItem('statusValue', statusElement.textContent);
-                         localStorage.setItem('statusColor', statusElement.style.color);
                     }
                 } else {
                     const value = parseFloat(message);
@@ -1159,7 +1163,7 @@
                      .then(confirmed => {
                          if(confirmed) {
                              let csvContent = "data:text/csv;charset=utf-8,";
-                             csvContent += "Time,Duration,Turbidity (NTU),pH,TDS (ppm),Degradation (%)\r\n";
+                             csvContent += "Time,Time Duration,Turbidity (NTU),pH,TDS (ppm),Degradation (%)\r\n";
                              temporaryData.forEach(row => {
                                  const csvRow = [
                                      `"${row.time}"`,
@@ -1523,22 +1527,22 @@
             </section>
         </div>
         <div id="contact" class="content">
-            <h1>Hubungi Kami</h1>
+            <h1>Contact Us</h1>
             <form id="contactForm" action="https://formspree.io/f/mblolqzq" method="POST">
                 <div class="contact-name">
-                    <input type="text" name="Nama" placeholder="Nama" required>
+                    <input type="text" name="Nama" placeholder="Name" required>
                 </div>
                 <div class="contact-email">
                     <input type="email" name="Email" placeholder="Email" required>
                 </div>
                 <div class="contact-subject">
-                    <input type="text" name="Subject" placeholder="Subjek" required>
+                    <input type="text" name="Subject" placeholder="Subject" required>
                 </div>
                 <div class="contact-message">
-                    <textarea name="Pesan" placeholder="Pesan" required></textarea>
+                    <textarea name="Pesan" placeholder="Message" required></textarea>
                 </div>
                 <div class="action-btn">
-                    <button type="submit" class="btn btn-submit">Kirim</button>
+                    <button type="submit" class="btn btn-submit">Send</button>
                 </div>
             </form>
             <div id="notification" class="notification" style="display: none;"></div>
@@ -1558,13 +1562,13 @@
                         }
                     });
                     if (response.ok) {
-                        showNotification("Pesan Anda berhasil dikirim! ✅", "success");
+                        showNotification("Your message was sent successfully! ✅", "success");
                         form.reset();
                     } else {
-                        showNotification("Gagal mengirim pesan. Silakan coba lagi. ❌", "error");
+                        showNotification("Failed to send message. Please try again. ❌", "error");
                     }
                 } catch (error) {
-                    showNotification("Terjadi kesalahan. Periksa koneksi internet Anda. ❌", "error");
+                    showNotification("An error occurred. Check your internet connection. ❌", "error");
                 }
             });
             function showNotification(message, type) {
@@ -1580,7 +1584,6 @@
             document.addEventListener('DOMContentLoaded', () => {
                 const initialTarget = 'dashboard';
                  activateContent(initialTarget);
-                // Removed redundant load call and initialization - handled by initializeSystemState triggered by load/auth change
              });
         </script>
     </div>
