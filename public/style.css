@@ -248,11 +248,51 @@ body {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    flex-wrap: nowrap;
+    padding-top: 3px;
+    padding-right: 10px;
+    padding-bottom: 3px;
+    padding-left: 10px;
+    background-color: #eaf6ff;
 }
 
-.dashboard-header .account-name {
+.dashboard-title {
+    font-size: 24px;
+    margin: 0;
+}
+
+.account-info {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    font-size: 14px;
     text-align: right;
-    margin-bottom: 15px;
+}
+
+.account-name,
+.system-status {
+    margin: 0;
+    color: #333;
+}
+
+/* RESPONSIVE BEHAVIOR */
+@media screen and (max-width: 600px) {
+    .dashboard-header {
+        flex-direction: row;
+        justify-content: space-between;
+        align-items: flex-start;
+        flex-wrap: wrap;
+    }
+
+    .dashboard-title {
+        font-size: 20px;
+    }
+
+    .account-info {
+        flex-direction: column;
+        align-items: flex-end;
+        text-align: right;
+    }
 }
 
 .dashboard-info {
