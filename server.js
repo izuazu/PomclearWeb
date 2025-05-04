@@ -9,11 +9,9 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-// Middleware
 app.use(express.static(path.join(__dirname, "public")));
 app.use(express.json());
 
-// MQTT Broker Configuration
 const mqttBroker = "wss://d089792bed824fa48635d8ef188c6799.s1.eu.hivemq.cloud:8884/mqtt";
 const mqttClient = mqtt.connect(mqttBroker, {
   username: "pomclear",
@@ -22,7 +20,6 @@ const mqttClient = mqtt.connect(mqttBroker, {
   rejectUnauthorized: false,
 });
 
-// Topics to subscribe
 const topics = [
   "iot/ph", "iot/turbidity", "iot/tds",
   "iot/light1", "iot/light2", "iot/light3", "iot/light4",
@@ -33,7 +30,6 @@ const topics = [
   "iot/online", "iot/raspi"
 ];
 
-// MQTT Handlers
 mqttClient.on("connect", () => {
   console.log("✅ Connected to MQTT Broker");
   mqttClient.subscribe(topics, (err) => {
@@ -61,7 +57,6 @@ mqttClient.on("message", (topic, message) => {
   }
 });
 
-// Socket.IO Handlers
 io.on("connection", (socket) => {
   console.log("🔌 Client connected");
   socket.on("publish", (data) => {
@@ -71,44 +66,38 @@ io.on("connection", (socket) => {
   });
 });
 
+let db;
 try {
   const serviceAccount = require("./serviceAccountKey.json");
   admin.initializeApp({
     credential: admin.credential.cert(serviceAccount),
     databaseURL: "https://pomclear-default-rtdb.asia-southeast1.firebasedatabase.app"
   });
-  const db = admin.database();
+  db = admin.database();
   console.log("✅ Firebase Admin SDK initialized");
-
-  // API to save data
-  app.post('/save-data', (req, res) => {
-    const data = req.body;
-    console.log('📩 Data received:', data);
-
-    if (!data || typeof data !== 'object') {
-      console.error("❌ Invalid data format");
-      return res.status(400).send("Invalid data format. Please check your request.");
-    }
-
-    const ref = db.ref("sensorData");
-    const newDataRef = ref.push();
-    newDataRef.set(data, (error) => {
-      if (error) {
-        console.error('❌ Error saving to Firebase:', error);
-        return res.status(500).send('Error saving data');
-      } else {
-        console.log('✅ Data saved to Firebase');
-        return res.status(200).send('Data saved successfully');
-      }
-    });
-  });
-
 } catch (error) {
   console.error("❌ Firebase Admin SDK init failed:", error);
-  process.exit(1); // Exit if Firebase fails (important for Railway)
+  process.exit(1);
 }
 
-// Use PORT from environment (for Railway), fallback to 3000
+app.post('/save-data', (req, res) => {
+  const data = req.body;
+
+  if (!data || typeof data !== 'object') {
+    return res.status(400).send("Invalid data format. Please check your request.");
+  }
+
+  const ref = db.ref("sensorData");
+  const newDataRef = ref.push();
+  newDataRef.set(data, (error) => {
+    if (error) {
+      return res.status(500).send('Error saving data');
+    } else {
+      return res.status(200).send('Data saved successfully');
+    }
+  });
+});
+
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Server running on http://0.0.0.0:${PORT}`);
