@@ -71,7 +71,6 @@ io.on("connection", (socket) => {
   });
 });
 
-// Firebase Initialization
 try {
   const serviceAccount = require("./serviceAccountKey.json");
   admin.initializeApp({
