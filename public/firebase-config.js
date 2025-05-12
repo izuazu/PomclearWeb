@@ -7,14 +7,14 @@
 // Your web app's Firebase configuration
 // For Firebase JS SDK v7.20.0 and later, measurementId is optional
 const firebaseConfig = {
-    apiKey: "AIzaSyBGYwEXdlb98DMqMFebbpj_mTJxyFC-QLE",
-    authDomain: "pomclear.firebaseapp.com",
-    databaseURL: "https://pomclear-default-rtdb.asia-southeast1.firebasedatabase.app",
-    projectId: "pomclear",
-    storageBucket: "pomclear.firebasestorage.app",
-    messagingSenderId: "883606921297",
-    appId: "1:883606921297:web:0b36c52b4385a89a661870",
-    measurementId: "G-PVZ68XQMVH"
+  apiKey: "AIzaSyBhSWditPBxTSBnX5UMeg91ipBbk2vGe1o",
+  authDomain: "pomclear-ec893.firebaseapp.com",
+  databaseURL: "https://pomclear-ec893-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "pomclear-ec893",
+  storageBucket: "pomclear-ec893.firebasestorage.app",
+  messagingSenderId: "653956233480",
+  appId: "1:653956233480:web:a79de9e542ed77969994bd",
+  measurementId: "G-PSWZX25Q6F"
 };
 
 // Initialize Firebase

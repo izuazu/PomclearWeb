@@ -142,11 +142,11 @@
 <input type="number" id="maxPH" name="maxPH" placeholder="e.g. 8.5">
 </div>
 <div class="setpoint-group">
-<label for="maxTDS">Max TDS</label>
+<label for="maxTDS">Max Turbidity (NTU)</label>
 <input type="number" id="maxTDS" name="maxTDS" placeholder="e.g. 200">
 </div>
 <div class="setpoint-group">
-<label for="maxPPM">Max PPM</label>
+<label for="maxPPM">Max PPM (PPM)</label>
 <input type="number" id="maxPPM" name="maxPPM" placeholder="e.g. 100">
 </div>
 <div class="setpoint-group">
@@ -324,14 +324,84 @@ auth.signOut()
 } else {}
 });
 });
+async function fetchAndDisplayFirebaseData(uid, isInitialLoad) {
+if (!uid) {
+console.error("UID is missing, cannot fetch data.");
+return;
+}
+const db = firebase.database();
+const sessionRef = db.ref(`/users/${uid}/session/current`);
+const dataRef = db.ref(`/users/${uid}/data`);
+const dataTableBodyDownload = document.getElementById('data-table-body');
+if (!dataTableBodyDownload) return;
+if (isInitialLoad) {
+     dataTableBodyDownload.innerHTML = '';
+ }
+try {
+    const sessionSnapshot = await sessionRef.once('value');
+    const sessionData = sessionSnapshot.val();
+    const started_at = sessionData ? sessionData.started_at : null;
+    if (!started_at) {
+         if(isInitialLoad && dataTableBodyDownload.innerHTML === ''){
+            dataTableBodyDownload.innerHTML = '<tr><td colspan="6" style="text-align:center;">Session start time not found. Cannot load historical data.</td></tr>';
+         }
+        return;
+    }
+    let queryStartTime = started_at;
+    let queryFunction = 'startAt';
+    let queryLimit = 500;
+    const query = dataRef.orderByChild('timestamp')[queryFunction](queryStartTime).limitToFirst(queryLimit);
+    const dataSnapshot = await query.once('value');
+    let newDataFound = false;
+    let firebaseTimestamps = new Set();
+    dataSnapshot.forEach(childSnapshot => {
+        newDataFound = true;
+        const dataItem = childSnapshot.val();
+        if(dataItem && dataItem.timestamp) {
+             firebaseTimestamps.add(dataItem.timestamp);
+             addTableRow(dataItem, dataTableBodyDownload, dataItem.timestamp);
+        } else {
+            addTableRow(dataItem, dataTableBodyDownload);
+        }
+    });
+    if (!newDataFound && isInitialLoad && dataTableBodyDownload.innerHTML === '') {
+         dataTableBodyDownload.innerHTML = '<tr><td colspan="6" style="text-align:center;">No historical data found for this session yet.</td></tr>';
+     }
+     temporaryData.forEach(liveDataPoint => {
+         const liveTimestamp = liveDataPoint.timestamp;
+         if (!firebaseTimestamps.has(liveTimestamp)) {
+            const liveTimeStr = liveDataPoint.time || new Date(liveTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+            addTableRow({...liveDataPoint, time: liveTimeStr }, dataTableBodyDownload, liveTimestamp);
+         }
+     });
+     localStorage.setItem('last_loaded_at', new Date().toISOString());
+} catch (error) {
+    console.error("Error fetching data from Firebase:", error);
+     if (dataTableBodyDownload && dataTableBodyDownload.innerHTML === '') {
+         dataTableBodyDownload.innerHTML = `<tr><td colspan="6" style="text-align:center; color: red;">Error loading historical data: ${error.message}</td></tr>`;
+     } else {
+         console.warn("Error fetching Firebase data, showing only live data if available:", error.message);
+         temporaryData.forEach(liveDataPoint => {
+             addTableRow(liveDataPoint, dataTableBodyDownload);
+         });
+     }
+    customAlert(`Error fetching historical data: ${error.message}`, "Firebase Error");
+}
+}
 function checkUidSync() {
 const previousSyncState = isUidSynced;
 isUidSynced = !!(currentUserUid && raspiUid && currentUserUid === raspiUid);
-if(isUidSynced !== previousSyncState){
+if (isUidSynced !== previousSyncState) {
 updateUiBasedOnSync();
+if(isUidSynced && document.getElementById('download')?.classList.contains('active')){
+fetchAndDisplayFirebaseData(currentUserUid, true);
 }
-if(currentUserUid && !isUidSynced) {
-socket.emit('publish', { topic: 'iot/web', message: currentUserUid });
+}
+if (currentUserUid && !isUidSynced) {
+socket.emit('publish', {
+topic: 'iot/web',
+message: currentUserUid
+});
 }
 }
 function updateUiBasedOnSync() {
@@ -350,8 +420,10 @@ const chartControls = document.getElementById('chartSelector');
 if (isUidSynced) {
 uidSyncStatusElement.textContent = "Device Synced";
 uidSyncStatusElement.style.color = "green";
-elementsToDisable.forEach(el => { if (el) el.disabled = false; });
-if(chartControls) chartControls.disabled = false;
+elementsToDisable.forEach(el => {
+if (el) el.disabled = false;
+});
+if (chartControls) chartControls.disabled = false;
 document.getElementById('monitoring').style.opacity = 1;
 document.getElementById('download').style.opacity = 1;
 document.getElementById('controlling').style.opacity = 1;
@@ -364,8 +436,10 @@ startMonitoringUpdates();
 } else {
 uidSyncStatusElement.textContent = "Waiting for device sync...";
 uidSyncStatusElement.style.color = "orange";
-elementsToDisable.forEach(el => { if (el) el.disabled = true; });
-if(chartControls) chartControls.disabled = true;
+elementsToDisable.forEach(el => {
+if (el) el.disabled = true;
+});
+if (chartControls) chartControls.disabled = true;
 document.getElementById('monitoring').style.opacity = 0.5;
 document.getElementById('download').style.opacity = 0.5;
 document.getElementById('controlling').style.opacity = 0.5;
@@ -375,6 +449,7 @@ if (p.id !== 'status' && p.id !== 'Durasi' && !isSystemRunning) {
 });
 stopMonitoringUpdates();
 }
+updateDownloadTableDisplay();
 }
 function showMainApp(user) {
 authContainer.style.display = 'none';
@@ -394,6 +469,20 @@ uidSyncInterval = setInterval(checkUidSync, 1000);
 const email_storage = user.email;
 isDeviceOnline = true;
 updateSystemStatusDisplay();
+if (!raspiUid) {
+const storedRaspiUid = localStorage.getItem('raspiUid');
+if (storedRaspiUid) {
+raspiUid = storedRaspiUid;
+}
+}
+checkUidSync();
+if (isUidSynced) {
+if(document.getElementById('download')?.classList.contains('active')){
+fetchAndDisplayFirebaseData(currentUserUid, true);
+}
+} else {
+updateDownloadTableDisplay();
+}
 }
 function showLoginScreen() {
 authContainer.style.display = 'flex';
@@ -411,6 +500,11 @@ showForm('login-form');
 isDeviceOnline = false;
 updateSystemStatusDisplay();
 updateUiBasedOnSync();
+const dataTableBodyDownload = document.getElementById('data-table-body');
+if (dataTableBodyDownload) {
+dataTableBodyDownload.innerHTML = '';
+dataTableBodyDownload.style.display = 'none';
+}
 }
 auth.onAuthStateChanged((user) => {
 if (user) {
@@ -598,7 +692,7 @@ if (isSystemRunning) {
 customAlert("Device offline or communication lost. Stopping system.", "System Alert");
 stopSystem();
 }
-}, 10000);
+}, 20000);
 }
 function startDurationAndDataIntervals(startTime) {
 clearInterval(durationInterval);
@@ -610,7 +704,7 @@ const now = new Date().getTime();
 const durationInSeconds = Math.max(0, Math.floor((now - startTime) / 1000));
 const minutes = Math.floor(durationInSeconds / 60);
 const seconds = durationInSeconds % 60;
-DurasiElement.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+
 const targetDurationMinutes = parseInt(savedConfig[setpointTopics.Time], 10);
 if (!isNaN(targetDurationMinutes) && targetDurationMinutes > 0) {
 const targetDurationSeconds = targetDurationMinutes * 60;
@@ -631,16 +725,9 @@ durationInterval = setInterval(updateDuration, 1000);
 chartUpdateInterval = setInterval(plotCollectedChartData, 1000);
 dataCollectionInterval = setInterval(() => {
 if (!isSystemRunning || !isUidSynced) { clearInterval(dataCollectionInterval); return; }
-const currentTimeStr = new Date().toLocaleTimeString();
+const currentTimeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
 const effectiveStartTime = parseInt(localStorage.getItem('startTime'), 10);
-let durationText = "00:00";
-if (effectiveStartTime) {
-const now = new Date().getTime();
-const durationInSeconds = Math.max(0, Math.floor((now - effectiveStartTime) / 1000));
-const minutes = Math.floor(durationInSeconds / 60);
-const seconds = durationInSeconds % 60;
-durationText = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-}
+let durationText = DurasiElement.textContent || "00:00";
 const phVal = parseFloat(phElement.textContent) || 0;
 const turbidityVal = parseFloat(turbidityElement.textContent) || 0;
 const tdsVal = parseFloat(tdsElement.textContent) || 0;
@@ -650,9 +737,6 @@ if (degradationTextContent !== "Waiting Co..." && degradationTextContent !== "Di
 degradationVal = parseFloat(degradationTextContent) || 0;
 }
 collectData(currentTimeStr, durationText, turbidityVal.toFixed(2), phVal.toFixed(2), tdsVal.toFixed(2), degradationVal.toFixed(2));
-if (document.getElementById('data-monitoring')?.classList.contains('active')) {
-updateTable();
-}
 }, 1000);
 }
 function startSystem() {
@@ -664,6 +748,7 @@ sendSystemStatus('running');
 const startTime = new Date().getTime();
 localStorage.setItem('startTime', startTime);
 localStorage.removeItem('elapsedTime');
+localStorage.removeItem('last_loaded_at');
 Co = null;
 localStorage.removeItem('initialConcentration');
 Object.keys(chartData).forEach(key => { chartData[key] = []; });
@@ -684,6 +769,7 @@ DurasiElement.textContent = "00:00";
 startDurationAndDataIntervals(startTime);
 updateSystemStatusDisplay();
 resetOnlineHeartbeatTimer();
+fetchAndDisplayFirebaseData(currentUserUid, true);
 } else {}
 }
 function resumeSystem() {
@@ -735,9 +821,6 @@ if (startTime) {
 const stopTime = new Date().getTime();
 const elapsedTime = Math.floor((stopTime - startTime) / 1000);
 localStorage.setItem('elapsedTime', elapsedTime);
-const minutes = Math.floor(elapsedTime / 60);
-const seconds = elapsedTime % 60;
-DurasiElement.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
 }
 clearInterval(durationInterval);
 durationInterval = null;
@@ -791,6 +874,8 @@ localStorage.removeItem('tdsValue');
 localStorage.removeItem('degradationValue');
 localStorage.removeItem('savedControlConfig');
 localStorage.removeItem('temporaryData');
+localStorage.removeItem('last_loaded_at');
+localStorage.removeItem('durationValue');
 Co = null;
 DurasiElement.textContent = "N/A";
 phElement.textContent = "N/A";
@@ -811,6 +896,11 @@ dashboardChart.data.datasets[0].data = chartData[currentDataset] || [];
 dashboardChart.update('none');
 resetControllingUI();
 resetTable();
+const dataTableBodyDownload = document.getElementById('data-table-body');
+if(dataTableBodyDownload) {
+dataTableBodyDownload.innerHTML = '';
+dataTableBodyDownload.style.display = 'none';
+}
 clearInterval(durationInterval); durationInterval = null;
 clearInterval(chartUpdateInterval); chartUpdateInterval = null;
 clearInterval(dataCollectionInterval); dataCollectionInterval = null;
@@ -872,7 +962,7 @@ const topic = setpointTopics[key];
 if (inputElement && savedConfig.hasOwnProperty(topic)) {
 inputElement.value = savedConfig[topic];
 } else if (inputElement) {
-const defaults = { minPH: '6', maxPH: '7', maxPPM: '10', maxTDS: '20', Time: '180' };
+const defaults = { minPH: '6', maxPH: '9', maxPPM: '350', maxTDS: '250', Time: '180' };
 inputElement.value = defaults[key] || '';
 }
 });
@@ -998,11 +1088,17 @@ updateUIFromSavedConfig();
 loadChartDataFromStorage();
 updateChart(currentDataset);
 temporaryData = JSON.parse(localStorage.getItem('temporaryData')) || [];
-updateDownloadTableDisplay();
+checkUidSync();
+if (currentUserUid && isUidSynced) {
+     if(document.getElementById('download')?.classList.contains('active')){
+         fetchAndDisplayFirebaseData(currentUserUid, true);
+     }
+} else {
+     updateDownloadTableDisplay();
+}
 const savedStatus = localStorage.getItem('systemStatus');
 const savedStartTime = localStorage.getItem('startTime');
 const savedCo = localStorage.getItem('initialConcentration');
-const savedElapsedTime = localStorage.getItem('elapsedTime');
 statusElement.textContent = 'N/A';
 statusElement.style.color = 'black';
 phElement.textContent = localStorage.getItem('phValue') || "N/A";
@@ -1010,41 +1106,34 @@ turbidityElement.textContent = localStorage.getItem('turbidityValue') || "N/A";
 tdsElement.textContent = localStorage.getItem('tdsValue') || "N/A";
 degradationElement.textContent = localStorage.getItem('degradationValue') || "N/A";
 if (savedCo) {
-Co = parseFloat(savedCo);
+    Co = parseFloat(savedCo);
 }
 if (currentUserUid && uidSyncInterval == null) {
-if (uidSyncInterval) clearInterval(uidSyncInterval);
-uidSyncInterval = setInterval(checkUidSync, 1000);
+    if (uidSyncInterval) clearInterval(uidSyncInterval);
+    uidSyncInterval = setInterval(checkUidSync, 1000);
 }
-checkUidSync();
 updateUiBasedOnSync();
 if (isUidSynced && savedStatus === 'running' && savedStartTime) {
-const startTime = parseInt(savedStartTime, 10);
-isSystemRunning = true;
-startDurationAndDataIntervals(startTime);
-isDeviceOnline = true;
-updateSystemStatusDisplay();
-resetOnlineHeartbeatTimer();
-} else if (savedStatus === 'stopped') {
-isSystemRunning = false;
-isDeviceOnline = true;
-if (savedElapsedTime) {
-const elapsedTime = parseInt(savedElapsedTime, 10);
-const minutes = Math.floor(elapsedTime / 60);
-const seconds = elapsedTime % 60;
-DurasiElement.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+    const startTime = parseInt(savedStartTime, 10);
+    isSystemRunning = true;
+    startDurationAndDataIntervals(startTime);
+    isDeviceOnline = true;
+    updateSystemStatusDisplay();
+    resetOnlineHeartbeatTimer();
+} else if (isUidSynced && savedStatus === 'stopped') {
+    isSystemRunning = false;
+    isDeviceOnline = true;
+    DurasiElement.textContent = localStorage.getItem('durationValue') || "N/A";
+    updateSystemStatusDisplay();
 } else {
-DurasiElement.textContent = "N/A";
-}
-updateSystemStatusDisplay();
-} else {
-isSystemRunning = false;
-DurasiElement.textContent = "N/A";
-clearInterval(durationInterval); durationInterval = null;
-clearInterval(chartUpdateInterval); chartUpdateInterval = null;
-clearInterval(dataCollectionInterval); dataCollectionInterval = null;
-isDeviceOnline = false;
-updateSystemStatusDisplay();
+    isSystemRunning = false;
+    DurasiElement.textContent = "N/A";
+    clearInterval(durationInterval); durationInterval = null;
+    clearInterval(chartUpdateInterval); chartUpdateInterval = null;
+    clearInterval(dataCollectionInterval); dataCollectionInterval = null;
+    isDeviceOnline = false;
+    localStorage.setItem('systemStatus','reset');
+    updateSystemStatusDisplay();
 }
 updateUiBasedOnSync();
 }
@@ -1054,12 +1143,14 @@ initializeSystemState();
 socket.on('mqttMessage', (data) => {
 const { topic, message } = data;
 if (topic === 'iot/raspi') {
+const previousRaspiUid = raspiUid;
 raspiUid = message.toString();
 localStorage.setItem('raspiUid', raspiUid);
 checkUidSync();
 return;
 }
-if (!isUidSynced && topic !== 'iot/online' && !topic.startsWith('iot/setpoint/')) {
+if (!isUidSynced && topic !== 'iot/online' && !topic.startsWith('iot/setpoint/') && topic !== 'iot/web') {
+return;
 }
 updateSystemStatusDisplay();
 const setpointKey = Object.keys(setpointTopics).find(key => setpointTopics[key] === topic);
@@ -1118,20 +1209,52 @@ resetSystem(true);
 }
 }
 else if (topic === 'iot/online') {
-if (message === '1' && isSystemRunning && isUidSynced) {
-isDeviceOnline = true;
+const deviceWasOffline = !isDeviceOnline;
+isDeviceOnline = message === '1';
 updateSystemStatusDisplay();
+if (isDeviceOnline && isSystemRunning && isUidSynced) {
 resetOnlineHeartbeatTimer();
-} else if (message === '1') {
-isDeviceOnline = true;
-updateSystemStatusDisplay();
+} else if (isDeviceOnline && !isSystemRunning && isUidSynced && deviceWasOffline) {
+const savedStatus = localStorage.getItem('systemStatus');
+if(savedStatus === 'stopped') {
+DurasiElement.textContent = localStorage.getItem('durationValue') || '00:00';
+} else {
+DurasiElement.textContent = 'N/A';
+phElement.textContent = localStorage.getItem('phValue') || "N/A";
+turbidityElement.textContent = localStorage.getItem('turbidityValue') || "N/A";
+tdsElement.textContent = localStorage.getItem('tdsValue') || "N/A";
+degradationElement.textContent = localStorage.getItem('degradationValue') || "N/A";
+}
+}
+}
+else if (topic === 'iot/duration') {
+const value = parseInt(message, 10);
+if (!isNaN(value)) {
+const minutes = Math.floor(value / 60);
+const seconds = value % 60;
+const formattedDuration = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+if(DurasiElement) DurasiElement.textContent = formattedDuration;
+if (!isSystemRunning) {
+          localStorage.setItem('durationValue', formattedDuration);
+     }
+}
+} else if (topic === 'iot/degradation') {
+const value = parseFloat(message);
+if (!isNaN(value) && degradationElement) {
+const formattedValue = value.toFixed(2);
+degradationElement.textContent = formattedValue;
+if (isSystemRunning && isUidSynced) {
+addChartData('degradation', value);
+lastPlottedValue.degradation = value;
+tempDataForChart.degradation = value;
+}
+localStorage.setItem('degradationValue', formattedValue);
 }
 }
 else if (isSystemRunning && isUidSynced) {
 const value = parseFloat(message);
 if (isNaN(value)) { return; }
 let dataUpdated = false;
-let currentDegradation = null;
 if (topic === 'iot/ph') {
 const formattedValue = value.toFixed(2);
 phElement.textContent = formattedValue;
@@ -1150,39 +1273,8 @@ tdsElement.textContent = formattedValue;
 addChartData('tds', value);
 localStorage.setItem('tdsValue', formattedValue);
 dataUpdated = true;
-if (Co === null && value > 0) {
-Co = value;
-localStorage.setItem('initialConcentration', Co.toString());
-currentDegradation = 0;
-const formattedDegradation = currentDegradation.toFixed(2);
-degradationElement.textContent = formattedDegradation;
-addChartData('degradation', currentDegradation);
-lastPlottedValue.degradation = currentDegradation;
-tempDataForChart.degradation = currentDegradation;
-localStorage.setItem('degradationValue', formattedDegradation);
-} else if (Co !== null && Co > 0) {
-currentDegradation = Math.max(0, ((Co - value) / Co) * 100);
-const formattedDegradation = currentDegradation.toFixed(2);
-degradationElement.textContent = formattedDegradation;
-addChartData('degradation', currentDegradation);
-localStorage.setItem('degradationValue', formattedDegradation);
-} else if (Co === 0) {
-degradationElement.textContent = "Div by Zero";
-addChartData('degradation', null);
-localStorage.setItem('degradationValue', "Div by Zero");
-currentDegradation = null;
-} else {
-degradationElement.textContent = "Waiting Co...";
-addChartData('degradation', null);
-localStorage.setItem('degradationValue', "Waiting Co...");
-currentDegradation = null;
-}
 }
 if (dataUpdated) {
-localStorage.setItem('phValue', phElement.textContent);
-localStorage.setItem('turbidityValue', turbidityElement.textContent);
-localStorage.setItem('tdsValue', tdsElement.textContent);
-localStorage.setItem('degradationValue', degradationElement.textContent);
 const currentPH = parseFloat(phElement.textContent);
 const currentTurbidity = parseFloat(turbidityElement.textContent);
 const currentTDS = parseFloat(tdsElement.textContent);
@@ -1220,7 +1312,7 @@ localStorage.setItem('turbidityValue', formattedValue);
 } else if (topic === 'iot/tds') {
 tdsElement.textContent = formattedValue;
 localStorage.setItem('tdsValue', formattedValue);
-if (degradationElement.textContent === "Loading..." || degradationElement.textContent === "N/A") {
+if (!topicHasBeenReceived('iot/degradation') && (degradationElement.textContent === "Loading..." || degradationElement.textContent === "N/A")) {
 degradationElement.textContent = "Waiting Co...";
 localStorage.setItem('degradationValue', "Waiting Co...");
 }
@@ -1229,12 +1321,20 @@ localStorage.setItem('degradationValue', "Waiting Co...");
 }
 }
 });
+let receivedTopics = new Set();
+function topicHasBeenReceived(topic) {
+return receivedTopics.has(topic);
+}
+socket.on('mqttMessage', (data) => {
+receivedTopics.add(data.topic);
+});
 function sendDataToServer(data) {
 const userEmail = localStorage.getItem('userEmail');
 if (!userEmail || !currentUserUid) {
 return;
 }
-const dataToSend = { ...data, userEmail: userEmail, uid: currentUserUid };
+const timestamp = new Date().toISOString();
+const dataToSend = { ...data, timestamp: timestamp, userEmail: userEmail, uid: currentUserUid };
 fetch('/save-data', {
 method: 'POST',
 headers: { 'Content-Type': 'application/json' },
@@ -1264,39 +1364,63 @@ sendDataToServer({ systemStatus: status });
 let temporaryData = JSON.parse(localStorage.getItem('temporaryData')) || [];
 function collectData(time, duration, turbidity, ph, tds, degradation) {
 if (!isSystemRunning || !isUidSynced) return;
-const dataPoint = { time, duration, turbidity, ph, tds, degradation };
+const dataPoint = { time, duration, turbidity, ph, tds, degradation, timestamp: new Date().toISOString() };
 temporaryData.push(dataPoint);
 try {
 localStorage.setItem('temporaryData', JSON.stringify(temporaryData));
 } catch(e) {
+console.warn("LocalStorage full, removing oldest temporary data point.");
 temporaryData.shift();
 localStorage.setItem('temporaryData', JSON.stringify(temporaryData));
 }
-if (document.getElementById('download')?.classList.contains('active')) {
-addTableRow(dataPoint);
+const dataTableBodyDownload = document.getElementById('data-table-body');
+if (dataTableBodyDownload && document.getElementById('download')?.classList.contains('active') && dataTableBodyDownload.style.display !== 'none') {
+addTableRow(dataPoint, dataTableBodyDownload, dataPoint.timestamp);
 }
 sendDataToServer(dataPoint);
 }
-function addTableRow(dataItem) {
-const dataTableBodyDownload = document.getElementById('data-table-body');
-if (!dataTableBodyDownload || dataTableBodyDownload.style.display === 'none') return;
+function addTableRow(dataItem, tableBodyElement, timestamp = null) {
+if (!tableBodyElement || !dataItem) return;
 const row = document.createElement('tr');
+if(timestamp) row.dataset.timestamp = timestamp;
+ let formattedDuration = 'N/A';
+        if (dataItem.duration !== undefined && dataItem.duration !== null) {
+             if (typeof dataItem.duration === 'number') {
+                const totalSeconds = dataItem.duration;
+                const minutes = Math.floor(totalSeconds / 60);
+                const seconds = totalSeconds % 60;
+                formattedDuration = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+            } else if (typeof dataItem.duration === 'string' && /^\d+$/.test(dataItem.duration)){
+                const totalSeconds = parseInt(dataItem.duration, 10);
+                 if(!isNaN(totalSeconds)){
+                    const minutes = Math.floor(totalSeconds / 60);
+                    const seconds = totalSeconds % 60;
+                    formattedDuration = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+                } else {
+                     formattedDuration = dataItem.duration;
+                }
+            }
+             else {
+                formattedDuration = dataItem.duration;
+            }
+        }
+ const displayTime = dataItem.time || (timestamp ? new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }) : 'N/A');
 row.innerHTML = `
-<td>${dataItem.time}</td>
-<td>${dataItem.duration}</td>
-<td>${dataItem.turbidity}</td>
-<td>${dataItem.ph}</td>
-<td>${dataItem.tds}</td>
-<td>${dataItem.degradation}</td>
+<td>${displayTime}</td>
+<td>${formattedDuration}</td>
+<td>${dataItem.turbidity !== undefined ? dataItem.turbidity : 'N/A'}</td>
+<td>${dataItem.ph !== undefined ? dataItem.ph : 'N/A'}</td>
+<td>${dataItem.tds !== undefined ? dataItem.tds : 'N/A'}</td>
+<td>${dataItem.degradation !== undefined ? dataItem.degradation : 'N/A'}</td>
 `;
-if (dataTableBodyDownload.firstChild) {
-dataTableBodyDownload.insertBefore(row, dataTableBodyDownload.firstChild);
-} else {
-dataTableBodyDownload.appendChild(row);
-}
+    if (tableBodyElement.firstChild) {
+        tableBodyElement.insertBefore(row, tableBodyElement.firstChild);
+    } else {
+        tableBodyElement.appendChild(row);
+    }
 const MAX_DISPLAY_ROWS = 100;
-while(dataTableBodyDownload.rows.length > MAX_DISPLAY_ROWS) {
-dataTableBodyDownload.deleteRow(dataTableBodyDownload.rows.length - 1);
+while(tableBodyElement.rows.length > MAX_DISPLAY_ROWS) {
+    tableBodyElement.deleteRow(tableBodyElement.rows.length - 1);
 }
 }
 function resetTable() {
@@ -1359,18 +1483,10 @@ startMonitoringUpdates();
 } else {
 stopMonitoringUpdates();
 }
-if (targetId === 'download' && isUidSynced) {
+if (targetId === 'download') {
 updateDownloadTableDisplay();
-if(dataTableBodyDownload && dataTableBodyDownload.style.display !== 'none'){
-dataTableBodyDownload.style.display = 'table-row-group';
-}
-} else if(targetId === 'download' && !isUidSynced){
-if(dataTableBodyDownload){
-dataTableBodyDownload.innerHTML = '<tr><td colspan="6" style="text-align:center;color:orange;">Sync with device to view data</td></tr>';
-dataTableBodyDownload.style.display = 'table-row-group';
-}
-} else {
-if(dataTableBodyDownload){
+if (isUidSynced && (!dataTableBodyDownload.hasChildNodes() || dataTableBodyDownload.innerHTML.includes('Loading') || dataTableBodyDownload.innerHTML.includes('Waiting') || dataTableBodyDownload.innerHTML.includes('No data') )) {
+fetchAndDisplayFirebaseData(currentUserUid, true);
 }
 }
 } else {}
@@ -1539,62 +1655,72 @@ if (chartInstance && (!isUidSynced || !isSystemRunning)) {
 <button id="download-txt" class="btn">Download as TXT</button>
 <button id="download-excel" class="btn">Download as Excel</button>
 <button id="view-txt" class="btn">View/Hide Data</button>
-<button id="downloadCsvButton" class="btn" >Download CSV</button>
 </div>
 <script>
 const dataTableBodyDownload = document.getElementById('data-table-body');
-function updateDownloadTableDisplay(data = temporaryData) {
-if (!dataTableBodyDownload) return;
-dataTableBodyDownload.innerHTML = '';
-if (!isUidSynced){
-dataTableBodyDownload.innerHTML = '<tr><td colspan="6" style="text-align:center;color:orange;">Sync with device to view data</td></tr>';
-dataTableBodyDownload.style.display = 'table-row-group';
-return;
+function updateDownloadTableDisplay() {
+    if (!dataTableBodyDownload) return;
+const isActiveTab = document.getElementById('download')?.classList.contains('active');
+const isTableVisible = dataTableBodyDownload.style.display !== 'none';
+if (!currentUserUid) {
+     if (isActiveTab || isTableVisible) {
+        dataTableBodyDownload.innerHTML = '<tr><td colspan="6" style="text-align:center;">Login to view data.</td></tr>';
+        dataTableBodyDownload.style.display = 'table-row-group';
+     }
+     return;
 }
-if(data.length === 0){
-dataTableBodyDownload.innerHTML = '<tr><td colspan="6" style="text-align:center;">No data collected yet.</td></tr>';
-dataTableBodyDownload.style.display = 'table-row-group';
-return;
+if (!isUidSynced) {
+    if (isActiveTab || isTableVisible) {
+        dataTableBodyDownload.innerHTML = '<tr><td colspan="6" style="text-align:center;color:orange;">Waiting for device sync or UID mismatch...</td></tr>';
+        dataTableBodyDownload.style.display = 'table-row-group';
+    }
+    return;
 }
-const reversedData = [...data].reverse();
-const displayData = reversedData.slice(0, 100);
-displayData.forEach(dataItem => {
-const row = document.createElement('tr');
-row.innerHTML = `
-<td>${dataItem.time}</td>
-<td>${dataItem.duration}</td>
-<td>${dataItem.turbidity}</td>
-<td>${dataItem.ph}</td>
-<td>${dataItem.tds}</td>
-<td>${dataItem.degradation}</td>
-`;
-dataTableBodyDownload.appendChild(row);
-});
+const systemStatus = localStorage.getItem('systemStatus');
+if(systemStatus === 'reset') {
+     if (isActiveTab || isTableVisible) {
+         dataTableBodyDownload.innerHTML = '<tr><td colspan="6" style="text-align:center;">System was reset. No data for current session.</td></tr>';
+         dataTableBodyDownload.style.display = 'table-row-group';
+     }
+     return;
+}
+if (isTableVisible && dataTableBodyDownload.rows.length === 0 && !localStorage.getItem('last_loaded_at')) {
+     dataTableBodyDownload.innerHTML = '<tr><td colspan="6" style="text-align:center;">Loading historical data...</td></tr>';
+} else if (isTableVisible && dataTableBodyDownload.rows.length === 0 && localStorage.getItem('last_loaded_at')) {
+     dataTableBodyDownload.innerHTML = '<tr><td colspan="6" style="text-align:center;">No data found for this session yet.</td></tr>';
+}
 }
 document.getElementById('view-txt').addEventListener('click', () => {
+if (!currentUserUid) { customAlert("Login to view data.", "Info"); return;}
 if (!isUidSynced) { customAlert("Cannot view data. System not synced with device.", "Sync Error"); return; }
 if (!dataTableBodyDownload) return;
 if (dataTableBodyDownload.style.display === 'none') {
-if (temporaryData.length === 0 && isUidSynced) {
-customAlert("No data available to view.", "Info");
-dataTableBodyDownload.innerHTML = '<tr><td colspan="6" style="text-align:center;">No data collected yet.</td></tr>';
-} else if(!isUidSynced){
-dataTableBodyDownload.innerHTML = '<tr><td colspan="6" style="text-align:center;color:orange;">Sync with device to view data</td></tr>';
+    if (!dataTableBodyDownload.hasChildNodes() || dataTableBodyDownload.rows.length === 0 || (dataTableBodyDownload.rows.length > 0 && dataTableBodyDownload.rows[0].cells.length < 6) || dataTableBodyDownload.innerHTML.includes('Loading') || dataTableBodyDownload.innerHTML.includes('No data') || dataTableBodyDownload.innerHTML.includes('Waiting') ) {
+         dataTableBodyDownload.innerHTML = '<tr><td colspan="6" style="text-align:center;">Loading data...</td></tr>';
+         dataTableBodyDownload.style.display = 'table-row-group';
+         fetchAndDisplayFirebaseData(currentUserUid, true).then(() => {
+              if(!dataTableBodyDownload.hasChildNodes() || dataTableBodyDownload.rows.length === 0 || (dataTableBodyDownload.rows.length > 0 && dataTableBodyDownload.rows[0].cells.length < 6)) {
+                 dataTableBodyDownload.innerHTML = '<tr><td colspan="6" style="text-align:center;">No data available to view for this session.</td></tr>';
+              } else if(dataTableBodyDownload.rows.length === 1 && dataTableBodyDownload.textContent.includes("Loading data")) {
+                 dataTableBodyDownload.innerHTML = '<tr><td colspan="6" style="text-align:center;">No data available to view for this session.</td></tr>';
+              }
+          }).catch(err => {
+                dataTableBodyDownload.innerHTML = '<tr><td colspan="6" style="text-align:center; color: red;">Error loading data.</td></tr>';
+          });
+     } else {
+          dataTableBodyDownload.style.display = 'table-row-group';
+     }
 } else {
-updateDownloadTableDisplay();
-}
-dataTableBodyDownload.style.display = 'table-row-group';
-} else {
-dataTableBodyDownload.style.display = 'none';
+    dataTableBodyDownload.style.display = 'none';
 }
 });
 document.getElementById('download-txt').addEventListener('click', () => {
 if (!isUidSynced) { customAlert("Cannot download. System not synced with device.", "Sync Error"); return; }
 if (temporaryData.length === 0) {
-customAlert("No data available to download.", "Download Error");
+customAlert("No live data available to download. Historical data not included in this format.", "Download Error");
 return;
 }
-customConfirm(`Download ${temporaryData.length} data rows as TXT?`, "Confirm Download")
+customConfirm(`Download ${temporaryData.length} live data rows as TXT?`, "Confirm Download")
 .then(confirmed => {
 if(confirmed){
 let txtContent = 'Time\tTime Duration\tTurbidity (NTU)\tpH\tTDS (ppm)\tDegradation (%)\n';
@@ -1616,10 +1742,10 @@ URL.revokeObjectURL(link.href);
 document.getElementById('download-excel').addEventListener('click', () => {
 if (!isUidSynced) { customAlert("Cannot download. System not synced with device.", "Sync Error"); return; }
 if (temporaryData.length === 0) {
-customAlert("No data available to download.", "Download Error");
+customAlert("No live data available to download. Historical data not included in this format.", "Download Error");
 return;
 }
-customConfirm(`Download ${temporaryData.length} data rows as Excel (XLS)?`, "Confirm Download")
+customConfirm(`Download ${temporaryData.length} live data rows as Excel (XLS)?`, "Confirm Download")
 .then(confirmed => {
 if(confirmed) {
 let excelContent = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="UTF-8"><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet><x:Name>SensorData</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml></head><body>';

@@ -27,7 +27,7 @@ const topics = [
   "iot/setpoint/ph_min", "iot/setpoint/ph_max",
   "iot/setpoint/turbidity_max", "iot/setpoint/tds_max",
   "iot/setpoint/duration_minutes", "iot/continue",
-  "iot/online", "iot/raspi"
+  "iot/online", "iot/raspi", "iot/duration", "iot/degradation"
 ];
 
 mqttClient.on("connect", () => {
@@ -71,7 +71,7 @@ try {
   const serviceAccount = require("./serviceAccountKey.json");
   admin.initializeApp({
     credential: admin.credential.cert(serviceAccount),
-    databaseURL: "https://pomclear-default-rtdb.asia-southeast1.firebasedatabase.app"
+    databaseURL: "https://pomclear-ec893-default-rtdb.asia-southeast1.firebasedatabase.app",
   });
   db = admin.database();
   console.log("✅ Firebase Admin SDK initialized");
@@ -100,5 +100,5 @@ app.post('/save-data', (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, "0.0.0.0", () => {
-  console.log(`🚀 Server running on http://0.0.0.0:${PORT}`);
+  console.log(`🚀 Server running on http://localhost:${PORT}`);
 });
